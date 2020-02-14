@@ -3,27 +3,75 @@ import json
 import socketserver
 import ssl
 import traceback
+import urllib
 import webbrowser
 import os
+from functools import wraps
 from http import HTTPStatus, server
 from http.server import HTTPServer
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
+from common_server.db import connect_db
+
 PATHS = {}
 
 
+def path_optional(decorator):
+    def wrapped(func_or_path):
+        if callable(func_or_path):
+            return decorator("/" + func_or_path.__name__)(func_or_path)
+        else:
+
+            def actual_decorator(f):
+                return decorator(func_or_path)(f)
+
+            return actual_decorator
+
+    return wrapped
+
+
+@path_optional
 def route(path):
     """Register a route handler."""
-
-    if callable(path):
-        return route("/" + path.__name__)(path)
 
     def wrap(f):
         PATHS[path] = f
         return f
 
     return wrap
+
+
+@path_optional
+def forward_to_server(path):
+    def wrap(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if IS_SERVER:
+                return f(*args, **kwargs)
+            else:
+                return multiplayer_post(path, kwargs)
+
+        return wrapped
+
+    return wrap
+
+
+def server_only(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if IS_SERVER:
+            return f(*args, **kwargs)
+        else:
+            raise Exception("Method not available locally!")
+
+    return wrapped
+
+
+def sendto(f):
+    def wrapped(data):
+        return f(**data)
+    return wrapped
 
 
 class Handler(server.BaseHTTPRequestHandler):
@@ -70,12 +118,25 @@ class Handler(server.BaseHTTPRequestHandler):
         pass
 
 
+class Server:
+    def __getattr__(self, item):
+        def f(**kwargs):
+            if IS_SERVER:
+                return PATHS["/" + item](**kwargs)
+            else:
+                return multiplayer_post(item, kwargs)
+        return f
+
+
+Server = Server()
+
+
 def multiplayer_post(path, data, server_url=None):
     """Post DATA to a multiplayer server PATH and return the response."""
     if not server_url:
         server_url = DEFAULT_SERVER
     data_bytes = bytes(json.dumps(data), encoding="utf-8")
-    request = Request(server_url + path, data_bytes, method="POST")
+    request = Request(urllib.parse.urljoin(server_url, path), data_bytes, method="POST")
     try:
         response = urlopen(request, context=ssl._create_unverified_context())
         text = response.read().decode("utf-8")
@@ -83,32 +144,8 @@ def multiplayer_post(path, data, server_url=None):
             return json.loads(text)
     except Exception as e:
         traceback.print_exc()
-        print(e)
+        raise  # print(e)
         return None
-
-
-def multiplayer_route(path, server_path=None):
-    """Convert a function that takes (data, send) into a route."""
-    if not server_path:
-        server_path = path
-
-    def wrap(f):
-        def send(data):
-            return multiplayer_post(server_path, data)
-
-        def routed_fn(data):
-            response = f(data, send)
-            return response
-
-        route(path)(routed_fn)
-        return f
-
-    return wrap
-
-
-def forward_to_server(data, send):
-    """Forward a request to the multiplayer server."""
-    return send(data)
 
 
 def start_server():
@@ -157,7 +194,10 @@ def snakify(data):
     return out
 
 
-def start(port, default_server, gui_folder):
+def start(port, default_server, gui_folder, db_init=None):
+    global DEFAULT_SERVER
+    DEFAULT_SERVER = default_server
+
     parser = argparse.ArgumentParser(description="Project GUI Server")
     parser.add_argument(
         "-s", help="Stand-alone: do not open browser", action="store_true"
@@ -170,8 +210,10 @@ def start(port, default_server, gui_folder):
     if "gunicorn" not in os.environ.get("SERVER_SOFTWARE", "") and not args.f:
         start_client(port, default_server, gui_folder, args.s)
     else:
+        if db_init:
+            db_init()
         app = start_server()
         if args.f:
-            app.run(port=port, threaded=False)
+            app.run(port=port, threaded=False, processes=1)
         else:
             return app
