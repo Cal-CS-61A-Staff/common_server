@@ -12,8 +12,6 @@ from http.server import HTTPServer
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
-from common_server.db import connect_db
-
 PATHS = {}
 
 
