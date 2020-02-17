@@ -5,20 +5,21 @@ from time import sleep
 
 # noinspection PyUnresolvedReferences
 import __main__
-from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
 
 NUM_RETRIES = 5
 SLEEP_DELAY = 2
 
 
 def setup_db(service_name):
+    from sqlalchemy import create_engine
     global engine
     engine = create_engine(os.getenv("DATABASE_URL", "mysql://localhost/{}".format(service_name)))
 
 
 @contextmanager
 def connect_db():
+    from sqlalchemy.exc import OperationalError
+
     def db(*args):
         for _ in range(NUM_RETRIES):
             with engine.connect() as conn:

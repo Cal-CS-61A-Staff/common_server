@@ -12,8 +12,6 @@ from http.server import HTTPServer
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
-from common_server.db import connect_db
-
 PATHS = {}
 
 
@@ -187,7 +185,7 @@ def snakify(data):
     for key, val in data.items():
         snake_key = []
         for x in key:
-            if x == x.upper():
+            if x != x.lower():
                 snake_key += "_"
             snake_key += x.lower()
         out["".join(snake_key)] = val
