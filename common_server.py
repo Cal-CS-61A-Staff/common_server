@@ -2,6 +2,7 @@ import argparse
 import json
 import socketserver
 import ssl
+import time
 import traceback
 import urllib
 import webbrowser
@@ -9,6 +10,7 @@ import os
 from functools import wraps
 from http import HTTPStatus, server
 from http.server import HTTPServer
+from urllib.error import URLError
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
 
@@ -174,9 +176,9 @@ def start_client(port, default_server, gui_folder, standalone):
     IS_SERVER = False
 
     socketserver.TCPServer.allow_reuse_address = True
-    httpd = HTTPServer(("localhost", port), Handler)
+    httpd = HTTPServer(("127.0.0.1", port), Handler)
     if not standalone:
-        webbrowser.open("http://localhost:" + str(port), new=0, autoraise=True)
+        webbrowser.open("http://127.0.0.1:" + str(port), new=0, autoraise=True)
     httpd.serve_forever()
 
 
@@ -190,6 +192,13 @@ def snakify(data):
             snake_key += x.lower()
         out["".join(snake_key)] = val
     return out
+
+
+@route("/kill")
+def kill():
+    if not IS_SERVER:
+        print("Exiting GUI")
+        exit(0)
 
 
 def start(port, default_server, gui_folder, db_init=None):
@@ -206,6 +215,14 @@ def start(port, default_server, gui_folder, db_init=None):
     import __main__
 
     if "gunicorn" not in os.environ.get("SERVER_SOFTWARE", "") and not args.f:
+        request = Request("http://127.0.0.1:{}/kill".format(port), bytes(json.dumps({}), encoding="utf-8"), method='POST')
+        try:
+            urlopen(request)
+            print("Killing existing gui process...")
+            time.sleep(1)
+        except URLError:
+            pass
+
         start_client(port, default_server, gui_folder, args.s)
     else:
         if db_init:
